@@ -1,8 +1,3 @@
-/**
- * models/TestResult.js
- * Mongoose schema for speed test results
- */
-
 const mongoose = require('mongoose');
 
 const testResultSchema = new mongoose.Schema(
@@ -13,23 +8,48 @@ const testResultSchema = new mongoose.Schema(
       required: true,
       index:    true,
     },
-    downloadSpeed: { type: Number, default: 0 },
-    uploadSpeed:   { type: Number, default: 0 },
-    ping:          { type: Number, default: 0 },
-    jitter:        { type: Number, default: 0 },
-    packetLoss:    { type: Number, default: 0 },
-    networkScore:  { type: Number, default: 0, min: 0, max: 100 },
-    networkType:   { type: String, default: 'unknown', maxlength: 50 },
-    isp:           { type: String, default: 'unknown', maxlength: 200 },
-    ip:            { type: String, default: 'unknown', maxlength: 50  },
-    location:      { type: String, default: 'unknown', maxlength: 200 },
+    downloadSpeed: {
+      type:     Number,
+      required: [true, 'downloadSpeed is required'],
+    },
+    uploadSpeed: {
+      type:     Number,
+      required: [true, 'uploadSpeed is required'],
+    },
+    ping: {
+      type:     Number,
+      required: [true, 'ping is required'],
+    },
+    jitter: {
+      type:    Number,
+      default: 0,
+    },
+    packetLoss: {
+      type:    Number,
+      default: 0,
+    },
+    networkScore: {
+      type:    Number,
+      default: 0,
+    },
+    networkType: {
+      type:    String,
+      default: 'unknown',
+    },
+    isp: {
+      type:    String,
+      default: '',
+    },
+    ip: {
+      type:    String,
+      default: '',
+    },
+    location: {
+      type:    String,
+      default: '',
+    },
   },
-  {
-    timestamps: true,   // createdAt = test timestamp
-  }
+  { timestamps: true }
 );
-
-// ── Index for fast per-user queries sorted by newest first
-testResultSchema.index({ user: 1, createdAt: -1 });
 
 module.exports = mongoose.model('TestResult', testResultSchema);

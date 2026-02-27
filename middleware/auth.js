@@ -1,37 +1,42 @@
-const jwt           = require('jsonwebtoken');
-const config        = require('../config/index');
-const { UserModel } = require('../models/db');
+const jwt  = require('jsonwebtoken');
+const User = require('../models/User');
 
-function protect(req, res, next) {
-  const authHeader = req.headers['authorization'] || '';
+const JWT_SECRET     = process.env.JWT_SECRET || 'changeme_secret';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
-  if (!authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'No token provided. Please log in.' });
-  }
+/**
+ * Generate a signed JWT for a user id
+ */
+const generateToken = (id) =>
+  jwt.sign({ id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
-  const token = authHeader.slice(7).trim();
-
-  let decoded;
+/**
+ * Express middleware — verifies Bearer token and attaches req.user
+ */
+const protect = async (req, res, next) => {
   try {
-    decoded = jwt.verify(token, config.jwt.secret);
-  } catch (err) {
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ success: false, message: 'Session expired. Please log in again.' });
+    const authHeader = req.headers.authorization || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, message: 'Not authorised. No token provided.' });
     }
-    return res.status(401).json({ success: false, message: 'Invalid token. Please log in again.' });
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'User no longer exists.' });
+    }
+
+    req.user = user;
+    next();
+  } catch (err) {
+    const message =
+      err.name === 'TokenExpiredError' ? 'Token expired. Please log in again.' :
+      err.name === 'JsonWebTokenError' ? 'Invalid token. Please log in again.' :
+      'Not authorised.';
+    return res.status(401).json({ success: false, message });
   }
-
-  const user = UserModel.findById(decoded.id);
-  if (!user) {
-    return res.status(401).json({ success: false, message: 'User no longer exists.' });
-  }
-
-  req.user = user;
-  next();
-}
-
-function generateToken(userId) {
-  return jwt.sign({ id: userId }, config.jwt.secret, { expiresIn: config.jwt.expiresIn });
-}
+};
 
 module.exports = { protect, generateToken };

@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: netscan-pro-api
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false        # You fill this in Render dashboard
+      - key: JWT_SECRET
+        sync: false        # You fill this in Render dashboard
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: CORS_ORIGINS
+        sync: false        # Set to your Netlify URL after deploying frontend

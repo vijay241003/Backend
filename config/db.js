@@ -15,7 +15,10 @@ async function connectDB() {
 
   try {
     const conn = await mongoose.connect(uri, {
-      dbName: 'netscan',
+      serverSelectionTimeoutMS: 15000,  // 15 seconds to find a server
+      socketTimeoutMS:          45000,  // 45 seconds socket timeout
+      connectTimeoutMS:         15000,  // 15 seconds connection timeout
+      family:                   4,      // Force IPv4 — fixes ECONNREFUSED on Windows
     });
     console.log(`✅  MongoDB Connected: ${conn.connection.host}`);
   } catch (err) {
@@ -24,7 +27,6 @@ async function connectDB() {
   }
 }
 
-// Log disconnect events
 mongoose.connection.on('disconnected', () => {
   console.warn('⚠️   MongoDB disconnected');
 });

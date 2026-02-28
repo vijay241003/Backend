@@ -5,7 +5,16 @@
  * ══════════════════════════════════════════════
  */
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
+// Debug — confirm env vars loaded correctly
+console.log('');
+console.log('🔍 ENV Check:');
+console.log('   NODE_ENV   :', process.env.NODE_ENV || 'NOT SET');
+console.log('   MONGODB_URI:', process.env.MONGODB_URI ? process.env.MONGODB_URI.substring(0, 35) + '...' : '❌ NOT FOUND');
+console.log('   JWT_SECRET :', process.env.JWT_SECRET ? '✅ SET' : '❌ NOT FOUND');
+console.log('');
 
 const express    = require('express');
 const cors       = require('cors');

@@ -225,7 +225,7 @@ app.delete('/api/network/history', protect, async (req, res, next) => {
 // Resend email helper
 async function sendOtpEmail(toEmail, otp) {
   await resend.emails.send({
-    from:    'Data Pack Optimizer <onboarding@resend.dev>',
+    from:    'Data Pack Optimizer <noreply@datapackoptimizer.com>',
     to:      toEmail,
     subject: 'Password Reset Code — Data Pack Optimizer',
     html: `

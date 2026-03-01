@@ -272,7 +272,7 @@ app.post('/api/auth/forgot-password', async (req, res, next) => {
       `,
     });
 
-    console.log(\`📧 OTP sent to: \${email}\`);
+    console.log(`📧 OTP sent to: \${email}`);
     res.json({ success: true, message: 'Verification code sent to your email.' });
 
   } catch (err) {
@@ -349,7 +349,7 @@ app.post('/api/auth/reset-password', async (req, res, next) => {
     // Clear OTP store
     otpStore.delete(key);
 
-    console.log(\`✅ Password reset: \${email}\`);
+    console.log(`✅ Password reset: \${email}`);
     res.json({ success: true, message: 'Password reset successfully. Please login with your new password.' });
 
   } catch (err) { next(err); }

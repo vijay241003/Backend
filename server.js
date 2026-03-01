@@ -22,7 +22,8 @@ const helmet    = require('helmet');
 const morgan    = require('morgan');
 const rateLimit = require('express-rate-limit');
 
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ── In-memory OTP store (keyed by email)
 const otpStore = new Map();
@@ -221,14 +222,24 @@ app.delete('/api/network/history', protect, async (req, res, next) => {
 //  FORGOT PASSWORD ROUTES
 // ══════════════════════════════════════════
 
-// Email transporter
-function createTransporter() {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,   // Gmail App Password (16 chars)
-    },
+// Resend email helper
+async function sendOtpEmail(toEmail, otp) {
+  await resend.emails.send({
+    from:    'Data Pack Optimizer <onboarding@resend.dev>',
+    to:      toEmail,
+    subject: 'Password Reset Code — Data Pack Optimizer',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;background:#040810;color:#d0e8ff;padding:32px;border-radius:12px;border:1px solid #1a2d4a;">
+        <h2 style="color:#00f5ff;font-size:20px;letter-spacing:2px;margin-bottom:8px;">DATA PACK OPTIMIZER</h2>
+        <p style="color:#4a7090;font-size:12px;margin-bottom:24px;">PASSWORD RESET REQUEST</p>
+        <p style="margin-bottom:16px;">Your verification code is:</p>
+        <div style="background:#0f1929;border:1px solid #243d5c;border-radius:10px;padding:24px;text-align:center;margin-bottom:24px;">
+          <span style="font-size:42px;font-weight:bold;letter-spacing:10px;color:#00f5ff;">${otp}</span>
+        </div>
+        <p style="color:#4a7090;font-size:12px;margin-bottom:8px;">&#x23F1; This code expires in <strong style="color:#ff8c00;">10 minutes</strong>.</p>
+        <p style="color:#4a7090;font-size:12px;">If you did not request this, please ignore this email.</p>
+      </div>
+    `,
   });
 }
 
@@ -252,25 +263,8 @@ app.post('/api/auth/forgot-password', async (req, res, next) => {
     // Store OTP
     otpStore.set(email.toLowerCase().trim(), { otp, expiresAt, verified: false });
 
-    // Send email
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from:    `"Data Pack Optimizer" <${process.env.EMAIL_USER}>`,
-      to:      email,
-      subject: 'Password Reset Code — Data Pack Optimizer',
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;background:#040810;color:#d0e8ff;padding:32px;border-radius:12px;border:1px solid #1a2d4a;">
-          <h2 style="color:#00f5ff;font-size:20px;letter-spacing:2px;margin-bottom:8px;">DATA PACK OPTIMIZER</h2>
-          <p style="color:#4a7090;font-size:12px;margin-bottom:24px;">PASSWORD RESET REQUEST</p>
-          <p style="margin-bottom:16px;">Your verification code is:</p>
-          <div style="background:#0f1929;border:1px solid #243d5c;border-radius:10px;padding:24px;text-align:center;margin-bottom:24px;">
-            <span style="font-size:42px;font-weight:bold;letter-spacing:10px;color:#00f5ff;">${otp}</span>
-          </div>
-          <p style="color:#4a7090;font-size:12px;margin-bottom:8px;">⏱ This code expires in <strong style="color:#ff8c00;">10 minutes</strong>.</p>
-          <p style="color:#4a7090;font-size:12px;">If you did not request this, please ignore this email.</p>
-        </div>
-      `,
-    });
+    // Send email via Resend
+    await sendOtpEmail(email, otp);
 
     console.log(`📧 OTP sent to: \${email}`);
     res.json({ success: true, message: 'Verification code sent to your email.' });

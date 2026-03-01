@@ -22,6 +22,11 @@ const helmet    = require('helmet');
 const morgan    = require('morgan');
 const rateLimit = require('express-rate-limit');
 
+const nodemailer = require('nodemailer');
+
+// ── In-memory OTP store (keyed by email)
+const otpStore = new Map();
+
 const { connectDB }              = require('./config/db');
 const User                       = require('./models/User');
 const TestResult                 = require('./models/TestResult');
@@ -208,6 +213,145 @@ app.delete('/api/network/history', protect, async (req, res, next) => {
     const deleted = await TestResult.clearHistory(req.user.id);
     console.log(`🗑  Cleared ${deleted} records for ${req.user.email}`);
     res.json({ success: true, message: `Deleted ${deleted} record(s).`, deleted });
+  } catch (err) { next(err); }
+});
+
+
+// ══════════════════════════════════════════
+//  FORGOT PASSWORD ROUTES
+// ══════════════════════════════════════════
+
+// Email transporter
+function createTransporter() {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,   // Gmail App Password (16 chars)
+    },
+  });
+}
+
+// POST /api/auth/forgot-password
+app.post('/api/auth/forgot-password', async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'Email is required.' });
+
+    // Check user exists (don't reveal if not — security)
+    const user = await User.findUserByEmail(email);
+    if (!user) {
+      // Always return success to prevent email enumeration
+      return res.json({ success: true, message: 'If this email is registered, a code has been sent.' });
+    }
+
+    // Generate 6-digit OTP
+    const otp       = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    // Store OTP
+    otpStore.set(email.toLowerCase().trim(), { otp, expiresAt, verified: false });
+
+    // Send email
+    const transporter = createTransporter();
+    await transporter.sendMail({
+      from:    `"Data Pack Optimizer" <${process.env.EMAIL_USER}>`,
+      to:      email,
+      subject: 'Password Reset Code — Data Pack Optimizer',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;background:#040810;color:#d0e8ff;padding:32px;border-radius:12px;border:1px solid #1a2d4a;">
+          <h2 style="color:#00f5ff;font-size:20px;letter-spacing:2px;margin-bottom:8px;">DATA PACK OPTIMIZER</h2>
+          <p style="color:#4a7090;font-size:12px;margin-bottom:24px;">PASSWORD RESET REQUEST</p>
+          <p style="margin-bottom:16px;">Your verification code is:</p>
+          <div style="background:#0f1929;border:1px solid #243d5c;border-radius:10px;padding:24px;text-align:center;margin-bottom:24px;">
+            <span style="font-size:42px;font-weight:bold;letter-spacing:10px;color:#00f5ff;">${otp}</span>
+          </div>
+          <p style="color:#4a7090;font-size:12px;margin-bottom:8px;">⏱ This code expires in <strong style="color:#ff8c00;">10 minutes</strong>.</p>
+          <p style="color:#4a7090;font-size:12px;">If you did not request this, please ignore this email.</p>
+        </div>
+      `,
+    });
+
+    console.log(\`📧 OTP sent to: \${email}\`);
+    res.json({ success: true, message: 'Verification code sent to your email.' });
+
+  } catch (err) {
+    console.error('OTP send error:', err.message);
+    next(err);
+  }
+});
+
+// POST /api/auth/verify-otp
+app.post('/api/auth/verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+  if (!email || !otp)
+    return res.status(400).json({ success: false, message: 'Email and OTP are required.' });
+
+  const key    = email.toLowerCase().trim();
+  const record = otpStore.get(key);
+
+  if (!record)
+    return res.status(400).json({ success: false, message: 'No OTP found. Please request a new code.' });
+
+  if (Date.now() > record.expiresAt) {
+    otpStore.delete(key);
+    return res.status(400).json({ success: false, message: 'OTP expired. Please request a new code.' });
+  }
+
+  if (record.otp !== otp.trim())
+    return res.status(400).json({ success: false, message: 'Incorrect code. Please try again.' });
+
+  // Mark as verified — generate one-time reset token
+  const { v4: uuidv4 } = require('uuid');
+  const resetToken = uuidv4();
+  otpStore.set(key, { ...record, verified: true, resetToken, resetTokenExpiry: Date.now() + 5 * 60 * 1000 });
+
+  res.json({ success: true, message: 'OTP verified.', resetToken });
+});
+
+// POST /api/auth/reset-password
+app.post('/api/auth/reset-password', async (req, res, next) => {
+  try {
+    const { email, resetToken, newPassword } = req.body;
+    if (!email || !resetToken || !newPassword)
+      return res.status(400).json({ success: false, message: 'Email, reset token and new password are required.' });
+
+    if (newPassword.length < 8)
+      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+
+    if (!/\d/.test(newPassword))
+      return res.status(400).json({ success: false, message: 'Password must contain at least one number.' });
+
+    const key    = email.toLowerCase().trim();
+    const record = otpStore.get(key);
+
+    if (!record || !record.verified)
+      return res.status(400).json({ success: false, message: 'Please verify your email first.' });
+
+    if (record.resetToken !== resetToken)
+      return res.status(400).json({ success: false, message: 'Invalid reset token.' });
+
+    if (Date.now() > record.resetTokenExpiry) {
+      otpStore.delete(key);
+      return res.status(400).json({ success: false, message: 'Reset session expired. Please start again.' });
+    }
+
+    // Update password in Firestore
+    const bcrypt = require('bcryptjs');
+    const db     = require('./config/db').getDB();
+    const snap   = await db.collection('users').where('email', '==', key).limit(1).get();
+    if (snap.empty)
+      return res.status(404).json({ success: false, message: 'Account not found.' });
+
+    const hashed = await bcrypt.hash(newPassword, 12);
+    await snap.docs[0].ref.update({ password: hashed });
+
+    // Clear OTP store
+    otpStore.delete(key);
+
+    console.log(\`✅ Password reset: \${email}\`);
+    res.json({ success: true, message: 'Password reset successfully. Please login with your new password.' });
+
   } catch (err) { next(err); }
 });
 

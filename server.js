@@ -155,6 +155,81 @@ app.post('/api/auth/login', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/auth/request-force-otp — verify credentials then send OTP before force login
+app.post('/api/auth/request-force-otp', async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password)
+      return res.status(400).json({ success: false, message: 'Email and password are required.' });
+
+    const userWithPass = await User.findUserByEmail(email);
+    if (!userWithPass)
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+
+    const match = await User.matchPassword(password, userWithPass.password);
+    if (!match)
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+
+    // Credentials verified — send OTP to registered email
+    const otp       = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+
+    // Store in otpStore with force flag
+    otpStore.set(`force_${email.toLowerCase().trim()}`, { otp, expiresAt });
+
+    await sendOtpEmail(email, otp, 'force');
+
+    console.log(`⚡ Force login OTP sent: ${email}`);
+    res.json({ success: true, message: 'Verification code sent to your registered email.' });
+
+  } catch (err) { next(err); }
+});
+
+// POST /api/auth/force-login — verify OTP then force login
+app.post('/api/auth/force-login', async (req, res, next) => {
+  try {
+    const { email, password, otp } = req.body;
+
+    if (!email || !password || !otp)
+      return res.status(400).json({ success: false, message: 'Email, password and OTP are required.' });
+
+    // Verify OTP
+    const key    = `force_${email.toLowerCase().trim()}`;
+    const record = otpStore.get(key);
+
+    if (!record)
+      return res.status(400).json({ success: false, message: 'No OTP found. Please request a new code.' });
+
+    if (Date.now() > record.expiresAt) {
+      otpStore.delete(key);
+      return res.status(400).json({ success: false, message: 'OTP expired. Please try again.' });
+    }
+
+    if (record.otp !== otp.trim())
+      return res.status(400).json({ success: false, message: 'Incorrect code. Please try again.' });
+
+    otpStore.delete(key);
+
+    // OTP verified — verify credentials and force login
+    const userWithPass = await User.findUserByEmail(email);
+    if (!userWithPass)
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+
+    const match = await User.matchPassword(password, userWithPass.password);
+    if (!match)
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+
+    const sessionId = await User.updateLastLogin(userWithPass.id);
+    const token     = generateToken(userWithPass.id, sessionId);
+    const { password: _, ...safeUser } = userWithPass;
+
+    console.log(`⚡ Force login success: ${email}`);
+    res.json({ success: true, message: 'Logged in. Other session has been terminated.', token, user: safeUser });
+
+  } catch (err) { next(err); }
+});
+
 // GET /api/auth/me  [protected]
 app.get('/api/auth/me', protect, (req, res) => {
   res.json({ success: true, user: req.user });
@@ -236,11 +311,21 @@ app.delete('/api/network/history', protect, async (req, res, next) => {
 // ══════════════════════════════════════════
 
 // Resend email helper
-async function sendOtpEmail(toEmail, otp) {
+async function sendOtpEmail(toEmail, otp, type = 'reset') {
+  const subject = type === 'force'
+    ? 'Security Verification Code — Data Pack Optimizer'
+    : 'Password Reset Code — Data Pack Optimizer';
+  const heading = type === 'force'
+    ? 'SECURITY VERIFICATION'
+    : 'PASSWORD RESET REQUEST';
+  const note = type === 'force'
+    ? 'Someone is trying to force login to your account from another device. If this was you, enter the code. If not, ignore this and change your password.'
+    : 'If you did not request this, please ignore this email.';
+
   await resend.emails.send({
     from:    'Data Pack Optimizer <onboarding@resend.dev>',
     to:      toEmail,
-    subject: 'Password Reset Code — Data Pack Optimizer',
+    subject,
     html: `
       <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;background:#040810;color:#d0e8ff;padding:32px;border-radius:12px;border:1px solid #1a2d4a;">
         <h2 style="color:#00f5ff;font-size:20px;letter-spacing:2px;margin-bottom:8px;">DATA PACK OPTIMIZER</h2>

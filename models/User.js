@@ -32,17 +32,19 @@ async function createUser({ name, email, password }) {
     email:     email.toLowerCase().trim(),
     password:  hashed,
     sessionId,
+    sessionActive: false,
     createdAt: now,
     lastLogin: now,
   });
 
   return {
-    id:        docRef.id,
-    name:      name.trim(),
-    email:     email.toLowerCase().trim(),
+    id:           docRef.id,
+    name:         name.trim(),
+    email:        email.toLowerCase().trim(),
     sessionId,
-    createdAt: now,
-    lastLogin: now,
+    sessionActive: false,
+    createdAt:    now,
+    lastLogin:    now,
   };
 }
 
@@ -65,15 +67,24 @@ async function findUserById(id) {
   return { id: doc.id, ...safe };
 }
 
-// Called on every login — generates new sessionId, invalidating all old tokens
+// Called on every login — generates new sessionId, marks session active
 async function updateLastLogin(id) {
   const db        = getDB();
   const sessionId = uuidv4();
   await db.collection(COLLECTION).doc(id).update({
-    lastLogin: new Date().toISOString(),
+    lastLogin:     new Date().toISOString(),
     sessionId,
+    sessionActive: true,
   });
   return sessionId;
+}
+
+// Called on logout — marks session inactive
+async function deactivateSession(id) {
+  const db = getDB();
+  await db.collection(COLLECTION).doc(id).update({
+    sessionActive: false,
+  });
 }
 
 async function updateUserName(id, name) {
@@ -97,6 +108,7 @@ module.exports = {
   findUserByEmail,
   findUserById,
   updateLastLogin,
+  deactivateSession,
   updateUserName,
   matchPassword,
   countUsers,

@@ -135,6 +135,15 @@ app.post('/api/auth/login', async (req, res, next) => {
     if (!match)
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
 
+    // ── Block login if account is already active on another device
+    if (userWithPass.sessionActive === true) {
+      return res.status(403).json({
+        success: false,
+        code:    'ACCOUNT_ALREADY_ACTIVE',
+        message: 'This account is already logged in on another device. Please logout from that device first.',
+      });
+    }
+
     const sessionId = await User.updateLastLogin(userWithPass.id);
 
     const token = generateToken(userWithPass.id, sessionId);
@@ -152,8 +161,12 @@ app.get('/api/auth/me', protect, (req, res) => {
 });
 
 // POST /api/auth/logout  [protected]
-app.post('/api/auth/logout', protect, (req, res) => {
-  res.json({ success: true, message: 'Logged out. Please delete the token from localStorage.' });
+app.post('/api/auth/logout', protect, async (req, res, next) => {
+  try {
+    await User.deactivateSession(req.user.id);
+    console.log(`👋 Logout: ${req.user.email}`);
+    res.json({ success: true, message: 'Logged out successfully.' });
+  } catch(err) { next(err); }
 });
 
 // PUT /api/auth/profile  [protected]
@@ -225,7 +238,7 @@ app.delete('/api/network/history', protect, async (req, res, next) => {
 // Resend email helper
 async function sendOtpEmail(toEmail, otp) {
   await resend.emails.send({
-    from: 'Data Pack Optimizer <onboarding@resend.dev>',
+    from:    'Data Pack Optimizer <onboarding@resend.dev>',
     to:      toEmail,
     subject: 'Password Reset Code — Data Pack Optimizer',
     html: `

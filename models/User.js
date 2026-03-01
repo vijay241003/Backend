@@ -1,65 +1,99 @@
-const mongoose = require('mongoose');
-const bcrypt   = require('bcryptjs');
+/**
+ * models/User.js
+ * User operations using Firestore
+ */
 
-const userSchema = new mongoose.Schema(
-  {
-    name: {
-      type:     String,
-      required: [true, 'Name is required'],
-      trim:     true,
-      maxlength: [60, 'Name too long'],
-    },
-    email: {
-      type:      String,
-      required:  [true, 'Email is required'],
-      unique:    true,
-      lowercase: true,
-      trim:      true,
-      match:     [/^\S+@\S+\.\S+$/, 'Please enter a valid email'],
-    },
-    password: {
-      type:     String,
-      required: [true, 'Password is required'],
-      minlength: [8, 'Password must be at least 8 characters'],
-      select:   false,
-    },
-    lastLogin: {
-      type: Date,
-    },
-  },
-  { timestamps: true }
-);
+const bcrypt     = require('bcryptjs');
+const { getDB }  = require('../config/db');
 
-// Hash password before saving
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
-});
+const COLLECTION = 'users';
 
-// Compare password
-userSchema.methods.matchPassword = async function (entered) {
-  return bcrypt.compare(entered, this.password);
-};
+async function createUser({ name, email, password }) {
+  const db = getDB();
 
-// Return safe user object (no password)
-userSchema.methods.toSafeObject = function () {
-  return {
-    id:        this._id,
-    name:      this.name,
-    email:     this.email,
-    lastLogin: this.lastLogin,
-    createdAt: this.createdAt,
-  };
-};
+  // Check if email already exists
+  const existing = await db.collection(COLLECTION)
+    .where('email', '==', email.toLowerCase().trim())
+    .limit(1)
+    .get();
 
-// Handle duplicate email error
-userSchema.post('save', function (err, doc, next) {
-  if (err.name === 'MongoServerError' && err.code === 11000) {
-    next(new Error('An account with that email already exists.'));
-  } else {
-    next(err);
+  if (!existing.empty) {
+    const err = new Error('An account with that email already exists.');
+    err.statusCode = 409;
+    throw err;
   }
-});
 
-module.exports = mongoose.model('User', userSchema);
+  const hashed = await bcrypt.hash(password, 12);
+  const now    = new Date().toISOString();
+
+  const docRef = await db.collection(COLLECTION).add({
+    name:      name.trim(),
+    email:     email.toLowerCase().trim(),
+    password:  hashed,
+    createdAt: now,
+    lastLogin: now,
+  });
+
+  return {
+    id:        docRef.id,
+    name:      name.trim(),
+    email:     email.toLowerCase().trim(),
+    createdAt: now,
+    lastLogin: now,
+  };
+}
+
+async function findUserByEmail(email) {
+  const db  = getDB();
+  const snap = await db.collection(COLLECTION)
+    .where('email', '==', email.toLowerCase().trim())
+    .limit(1)
+    .get();
+
+  if (snap.empty) return null;
+  const doc = snap.docs[0];
+  return { id: doc.id, ...doc.data() };
+}
+
+async function findUserById(id) {
+  const db  = getDB();
+  const doc = await db.collection(COLLECTION).doc(id).get();
+  if (!doc.exists) return null;
+  const data = doc.data();
+  // Remove password from returned object
+  const { password, ...safe } = data;
+  return { id: doc.id, ...safe };
+}
+
+async function updateLastLogin(id) {
+  const db = getDB();
+  await db.collection(COLLECTION).doc(id).update({
+    lastLogin: new Date().toISOString(),
+  });
+}
+
+async function updateUserName(id, name) {
+  const db = getDB();
+  await db.collection(COLLECTION).doc(id).update({ name: name.trim() });
+  return findUserById(id);
+}
+
+async function matchPassword(entered, hashed) {
+  return bcrypt.compare(entered, hashed);
+}
+
+async function countUsers() {
+  const db   = getDB();
+  const snap = await db.collection(COLLECTION).count().get();
+  return snap.data().count;
+}
+
+module.exports = {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  updateLastLogin,
+  updateUserName,
+  matchPassword,
+  countUsers,
+};

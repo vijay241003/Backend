@@ -1,38 +1,33 @@
 /**
  * config/db.js
- * Connect to MongoDB Atlas
+ * Initialize Firebase Firestore
  */
 
-const mongoose = require('mongoose');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore }        = require('firebase-admin/firestore');
 
-async function connectDB() {
-  const uri = process.env.MONGODB_URI;
+let db;
 
-  if (!uri) {
-    console.error('❌  MONGODB_URI is not set in environment variables!');
-    process.exit(1);
-  }
-
+function connectDB() {
   try {
-    const conn = await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 15000,  // 15 seconds to find a server
-      socketTimeoutMS:          45000,  // 45 seconds socket timeout
-      connectTimeoutMS:         15000,  // 15 seconds connection timeout
-      family:                   4,      // Force IPv4 — fixes ECONNREFUSED on Windows
+    initializeApp({
+      credential: cert({
+        projectId:    process.env.FIREBASE_PROJECT_ID,
+        clientEmail:  process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey:   process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      }),
     });
-    console.log(`✅  MongoDB Connected: ${conn.connection.host}`);
+
+    db = getFirestore();
+    console.log('✅  Firebase Firestore connected!');
   } catch (err) {
-    console.error('❌  MongoDB connection failed:', err.message);
+    console.error('❌  Firebase connection failed:', err.message);
     process.exit(1);
   }
 }
 
-mongoose.connection.on('disconnected', () => {
-  console.warn('⚠️   MongoDB disconnected');
-});
+function getDB() {
+  return db;
+}
 
-mongoose.connection.on('reconnected', () => {
-  console.log('🔄  MongoDB reconnected');
-});
-
-module.exports = connectDB;
+module.exports = { connectDB, getDB };

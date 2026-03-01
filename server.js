@@ -105,7 +105,7 @@ app.post('/api/auth/register', async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Password must contain at least one number.' });
 
     const user  = await User.createUser({ name, email, password });
-    const token = generateToken(user.id);
+    const token = generateToken(user.id, user.sessionId);
 
     console.log(`✅ Registered: ${email}`);
     res.status(201).json({ success: true, message: 'Account created!', token, user });
@@ -129,9 +129,9 @@ app.post('/api/auth/login', async (req, res, next) => {
     if (!match)
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
 
-    await User.updateLastLogin(userWithPass.id);
+    const sessionId = await User.updateLastLogin(userWithPass.id);
 
-    const token = generateToken(userWithPass.id);
+    const token = generateToken(userWithPass.id, sessionId);
     const { password: _, ...safeUser } = userWithPass;
 
     console.log(`✅ Login: ${email}`);

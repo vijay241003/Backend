@@ -1,21 +1,21 @@
 /**
  * models/User.js
  * User operations using Firestore
+ * Includes single-session security (sessionId)
  */
 
-const bcrypt     = require('bcryptjs');
-const { getDB }  = require('../config/db');
+const bcrypt         = require('bcryptjs');
+const { v4: uuidv4 } = require('uuid');
+const { getDB }      = require('../config/db');
 
 const COLLECTION = 'users';
 
 async function createUser({ name, email, password }) {
   const db = getDB();
 
-  // Check if email already exists
   const existing = await db.collection(COLLECTION)
     .where('email', '==', email.toLowerCase().trim())
-    .limit(1)
-    .get();
+    .limit(1).get();
 
   if (!existing.empty) {
     const err = new Error('An account with that email already exists.');
@@ -23,13 +23,15 @@ async function createUser({ name, email, password }) {
     throw err;
   }
 
-  const hashed = await bcrypt.hash(password, 12);
-  const now    = new Date().toISOString();
+  const hashed    = await bcrypt.hash(password, 12);
+  const now       = new Date().toISOString();
+  const sessionId = uuidv4();
 
   const docRef = await db.collection(COLLECTION).add({
     name:      name.trim(),
     email:     email.toLowerCase().trim(),
     password:  hashed,
+    sessionId,
     createdAt: now,
     lastLogin: now,
   });
@@ -38,17 +40,17 @@ async function createUser({ name, email, password }) {
     id:        docRef.id,
     name:      name.trim(),
     email:     email.toLowerCase().trim(),
+    sessionId,
     createdAt: now,
     lastLogin: now,
   };
 }
 
 async function findUserByEmail(email) {
-  const db  = getDB();
+  const db   = getDB();
   const snap = await db.collection(COLLECTION)
     .where('email', '==', email.toLowerCase().trim())
-    .limit(1)
-    .get();
+    .limit(1).get();
 
   if (snap.empty) return null;
   const doc = snap.docs[0];
@@ -59,17 +61,19 @@ async function findUserById(id) {
   const db  = getDB();
   const doc = await db.collection(COLLECTION).doc(id).get();
   if (!doc.exists) return null;
-  const data = doc.data();
-  // Remove password from returned object
-  const { password, ...safe } = data;
+  const { password, ...safe } = doc.data();
   return { id: doc.id, ...safe };
 }
 
+// Called on every login — generates new sessionId, invalidating all old tokens
 async function updateLastLogin(id) {
-  const db = getDB();
+  const db        = getDB();
+  const sessionId = uuidv4();
   await db.collection(COLLECTION).doc(id).update({
     lastLogin: new Date().toISOString(),
+    sessionId,
   });
+  return sessionId;
 }
 
 async function updateUserName(id, name) {

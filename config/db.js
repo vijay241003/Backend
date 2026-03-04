@@ -1,0 +1,38 @@
+/**
+ * config/db.js
+ * Initialize Firebase Firestore
+ */
+
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore }        = require('firebase-admin/firestore');
+
+let db;
+
+function connectDB() {
+  try {
+    // Handle private key newlines — Render stores \n as literal backslash-n
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY
+      ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n').replace(/\\\\n/g, '\n')
+      : undefined;
+
+    initializeApp({
+      credential: cert({
+        projectId:   process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey,
+      }),
+    });
+
+    db = getFirestore();
+    console.log('✅  Firebase Firestore connected!');
+  } catch (err) {
+    console.error('❌  Firebase connection failed:', err.message);
+    process.exit(1);
+  }
+}
+
+function getDB() {
+  return db;
+}
+
+module.exports = { connectDB, getDB };
